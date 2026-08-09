@@ -1,7 +1,5 @@
 # Kinetix: 3D Gesture Sculptor 🖐️✨
 
-[![Netlify Status](https://api.netlify.com/api/v1/badges/0ed10c19-6d5e-4b03-9c6b-38281ffbc1a1/deploy-status)](https://app.netlify.com/projects/kinetix-demo/deploys)
-
 **Kinetix** is a real-time Air-Drawing & 3D Gesture Canvas application. It leverages your webcam and advanced client-side AI hand-tracking to let you paint, draw, and sculpt glowing 3D objects in thin air using nothing but hand gestures.
 
 Built with a sleek, cyberpunk-inspired dark-mode aesthetic, Kinetix bridges the gap between physical movement and digital art.
