@@ -1,15 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
-import { Hand, Paintbrush, Eraser, Loader2, Cuboid, Pencil } from "lucide-react";
+import { Hand, Paintbrush, Eraser, Loader2, Maximize, Palette } from "lucide-react";
 import Telemetry from "./Telemetry";
 import ThreeCanvas from "./ThreeCanvas";
 
-type Gesture = "Idle" | "Drawing" | "Peace" | "Open Palm" | "OK";
-type AppMode = "2D" | "3D";
+export type Gesture = "Idle" | "Drawing" | "Pinch" | "Open Palm" | "OK" | "Peace";
+
+export interface HandData {
+  landmarks: any[] | null;
+  gesture: Gesture;
+  color: string;
+  triggerWipe: boolean;
+}
 
 const COLORS = [
   "#06b6d4", // Cyberpunk Cyan
@@ -21,35 +27,18 @@ const COLORS = [
   "#ffffff", // Plasma White
 ];
 
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface Stroke {
-  points: Point[];
-  color: string;
-  isShape?: "Circle" | "Rectangle";
-  bbox?: { x: number; y: number; w: number; h: number };
-}
-
 export default function GestureCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  const [mode, setMode] = useState<AppMode>("2D");
   const [gesture, setGesture] = useState<Gesture>("Idle");
   const [activeColorIndex, setActiveColorIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState(true);
-  const [show3DInstructions, setShow3DInstructions] = useState(false);
-  const [hasSeen3D, setHasSeen3D] = useState(false);
 
-  // Telemetry state
   const [fps, setFps] = useState(0);
-  const [handPos, setHandPos] = useState<Point | null>(null);
+  const [handPos, setHandPos] = useState<{x: number, y: number} | null>(null);
 
   const landmarkerRef = useRef<HandLandmarker | null>(null);
   const requestRef = useRef<number>(0);
@@ -57,48 +46,28 @@ export default function GestureCanvas() {
   const lastFrameTimeRef = useRef(performance.now());
   const activeColorIndexRef = useRef(activeColorIndex);
 
-  // Advanced Engine State
-  const strokesRef = useRef<Stroke[]>([]);
-  const currentStrokeRef = useRef<Stroke | null>(null);
-  const isDrawingRef = useRef(false);
-  
-  // Undo gesture tracking
-  const lastWristRef = useRef<{ x: number, time: number } | null>(null);
+  // Shared ref for the 3D engine to poll at 60fps without React re-renders
+  const handDataRef = useRef<HandData>({
+    landmarks: null,
+    gesture: "Idle",
+    color: COLORS[0],
+    triggerWipe: false,
+  });
 
-  // Gesture duration tracking
+  // Wave to erase tracking
+  const waveTrackerRef = useRef<{ x: number, time: number, direction: number, changes: number } | null>(null);
+
   const gestureStateRef = useRef<{ type: Gesture; startTime: number; triggered: boolean }>({
     type: "Idle", startTime: 0, triggered: false
   });
 
   useEffect(() => {
     activeColorIndexRef.current = activeColorIndex;
+    handDataRef.current.color = COLORS[activeColorIndex];
   }, [activeColorIndex]);
-
-  // Handle ResizeObserver
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        const { width, height } = entry.contentRect;
-        const canvas = canvasRef.current;
-        if (canvas) {
-          // Adjust internal resolution to match physical pixels, preserve strokes
-          canvas.width = width;
-          canvas.height = height;
-          // Trigger a re-render of strokes automatically in the next frame
-        }
-      }
-    });
-
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
-  }, []);
 
   useEffect(() => {
     if (showInstructions) return;
-
     let stream: MediaStream | null = null;
 
     const initMediaPipe = async () => {
@@ -141,50 +110,9 @@ export default function GestureCanvas() {
     };
   }, [showInstructions]);
 
-  const drawStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    ctx.clearRect(0, 0, width, height);
-
-    const allStrokes = [...strokesRef.current];
-    if (currentStrokeRef.current) {
-      allStrokes.push(currentStrokeRef.current);
-    }
-
-    allStrokes.forEach((stroke) => {
-      if (stroke.points.length === 0) return;
-
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = 6;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = stroke.color;
-
-      ctx.beginPath();
-
-      if (stroke.isShape && stroke.bbox) {
-        const { x, y, w, h } = stroke.bbox;
-        if (stroke.isShape === "Circle") {
-          const radius = Math.max(w, h) / 2;
-          ctx.arc(x + w/2, y + h/2, radius, 0, 2 * Math.PI);
-        } else if (stroke.isShape === "Rectangle") {
-          ctx.rect(x, y, w, h);
-        }
-      } else {
-        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-        for (let i = 1; i < stroke.points.length; i++) {
-          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-        }
-      }
-      
-      ctx.stroke();
-      ctx.shadowBlur = 0; // reset
-    });
-  };
-
   const predictWebcam = () => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || !landmarkerRef.current) return;
+    if (!video || !landmarkerRef.current) return;
 
     if (video.videoWidth === 0 || video.videoHeight === 0) {
       requestRef.current = requestAnimationFrame(predictWebcam);
@@ -200,54 +128,62 @@ export default function GestureCanvas() {
 
     if (video.currentTime !== lastVideoTimeRef.current) {
       lastVideoTimeRef.current = video.currentTime;
-
-      // Update canvas resolution only if it doesn't match the client bounding box
-      const rect = video.getBoundingClientRect();
-      if (rect.width > 0 && (canvas.width !== rect.width || canvas.height !== rect.height)) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-      }
-
       const results = landmarkerRef.current.detectForVideo(video, now);
-      processResults(results, canvas);
-    } else {
-      // Still need to re-render 2D strokes even if no new video frame
-      if (mode === "2D") {
-        const ctx = canvas.getContext("2d");
-        if (ctx) drawStrokes(ctx, canvas.width, canvas.height);
-      }
+      processResults(results, now);
     }
 
     requestRef.current = requestAnimationFrame(predictWebcam);
   };
 
-  const processResults = (results: any, canvas: HTMLCanvasElement) => {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
+  const processResults = (results: any, now: number) => {
     if (!results.landmarks || results.landmarks.length === 0) {
-      handlePinchRelease();
       setGesture("Idle");
       setHandPos(null);
-      if (mode === "2D") drawStrokes(ctx, canvas.width, canvas.height);
+      handDataRef.current.landmarks = null;
+      handDataRef.current.gesture = "Idle";
       return;
     }
 
     const landmarks = results.landmarks[0];
-    
-    // Telemetry normalized coordinates (mirrored)
     setHandPos({ x: 1 - landmarks[8].x, y: landmarks[8].y });
+    
+    let currentGesture = detectGesture(landmarks);
 
-    const currentGesture = detectGesture(landmarks);
-    setGesture(currentGesture);
+    // Wave detection logic
+    if (currentGesture === "Open Palm") {
+      const wristX = landmarks[0].x;
+      if (waveTrackerRef.current) {
+        const dx = wristX - waveTrackerRef.current.x;
+        const dt = now - waveTrackerRef.current.time;
+        if (Math.abs(dx) > 0.05 && dt < 200) {
+          const dir = Math.sign(dx);
+          if (dir !== waveTrackerRef.current.direction) {
+            waveTrackerRef.current.changes += 1;
+            waveTrackerRef.current.direction = dir;
+            waveTrackerRef.current.x = wristX;
+            waveTrackerRef.current.time = now;
+            
+            if (waveTrackerRef.current.changes > 3) {
+              handDataRef.current.triggerWipe = true;
+              waveTrackerRef.current.changes = 0; // reset
+            }
+          }
+        } else if (dt >= 200) {
+          waveTrackerRef.current = { x: wristX, time: now, direction: 0, changes: 0 };
+        }
+      } else {
+        waveTrackerRef.current = { x: wristX, time: now, direction: 0, changes: 0 };
+      }
+    } else {
+      waveTrackerRef.current = null;
+    }
 
-    const now = performance.now();
     const state = gestureStateRef.current;
 
-    // Track gesture duration for OK sign (color swap)
+    // OK Sign Color Cycle Logic
     if (currentGesture === "OK") {
       if (state.type !== "OK") {
-        if (now - state.startTime > 1000) { // 1 second cooldown
+        if (now - state.startTime > 1000) {
           state.type = "OK";
           state.startTime = now;
           state.triggered = false;
@@ -255,7 +191,7 @@ export default function GestureCanvas() {
       } else if (!state.triggered && now - state.startTime > 500) {
         setActiveColorIndex((prev) => (prev + 1) % COLORS.length);
         state.triggered = true;
-        state.startTime = now; // reset start time to begin the cooldown
+        state.startTime = now;
       }
     } else {
       if (state.type !== "OK" || (state.type === "OK" && now - state.startTime > 1000)) {
@@ -264,100 +200,14 @@ export default function GestureCanvas() {
       }
     }
 
-    // Handle Open Palm to clear
-    if (currentGesture === "Open Palm") {
-      strokesRef.current = [];
-      currentStrokeRef.current = null;
-    }
-
-    // Handle Left Swipe to Undo (rapid movement of wrist x from > to <)
-    const wrist = landmarks[0];
-    const mirroredWristX = 1 - wrist.x;
-    if (lastWristRef.current) {
-      const dt = now - lastWristRef.current.time;
-      const dx = mirroredWristX - lastWristRef.current.x;
-      // If moved left quickly (-x direction since it's mirrored, wait: 
-      // mirrored X: 0 is left edge, 1 is right edge. 
-      // Movement from right to left means X goes from high to low. So dx < 0.
-      if (dx < -0.15 && dt < 150) { 
-        // Trigger undo
-        strokesRef.current.pop();
-        lastWristRef.current = null; // debounce
-      } else {
-        lastWristRef.current = { x: mirroredWristX, time: now };
-      }
-    } else {
-      lastWristRef.current = { x: mirroredWristX, time: now };
-    }
-
-    // Handle Drawing (2D Mode only)
-    if (mode === "2D") {
-      if (currentGesture === "Drawing") {
-        const indexTip = landmarks[8];
-        const rawX = (1 - indexTip.x) * canvas.width;
-        const rawY = indexTip.y * canvas.height;
-
-        if (!isDrawingRef.current) {
-          isDrawingRef.current = true;
-          currentStrokeRef.current = {
-            points: [{ x: rawX, y: rawY }],
-            color: COLORS[activeColorIndexRef.current],
-          };
-        } else if (currentStrokeRef.current) {
-          const pts = currentStrokeRef.current.points;
-          const lastPos = pts[pts.length - 1];
-          // Exponential smoothing
-          const smoothing = 0.25; 
-          const x = lastPos.x + (rawX - lastPos.x) * smoothing;
-          const y = lastPos.y + (rawY - lastPos.y) * smoothing;
-          pts.push({ x, y });
-        }
-      } else {
-        handlePinchRelease();
-      }
-
-      drawStrokes(ctx, canvas.width, canvas.height);
-    }
-  };
-
-  const handlePinchRelease = () => {
-    if (isDrawingRef.current && currentStrokeRef.current) {
-      const stroke = currentStrokeRef.current;
-      if (stroke.points.length > 10) {
-        // Auto-Snap Logic
-        const first = stroke.points[0];
-        const last = stroke.points[stroke.points.length - 1];
-        const dist = Math.sqrt(Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2));
-        
-        if (dist < 60) {
-          // Closed loop, check bounds
-          const xs = stroke.points.map(p => p.x);
-          const ys = stroke.points.map(p => p.y);
-          const minX = Math.min(...xs);
-          const maxX = Math.max(...xs);
-          const minY = Math.min(...ys);
-          const maxY = Math.max(...ys);
-          const w = maxX - minX;
-          const h = maxY - minY;
-
-          if (w > 20 && h > 20) {
-            stroke.bbox = { x: minX, y: minY, w, h };
-            if (Math.abs(w - h) < 40) {
-              stroke.isShape = "Circle";
-            } else {
-              stroke.isShape = "Rectangle";
-            }
-          }
-        }
-      }
-      strokesRef.current.push(stroke);
-    }
-    isDrawingRef.current = false;
-    currentStrokeRef.current = null;
+    setGesture(currentGesture);
+    handDataRef.current.landmarks = landmarks;
+    handDataRef.current.gesture = currentGesture;
   };
 
   const detectGesture = (landmarks: any[]): Gesture => {
     const thumbTip = landmarks[4];
+    const thumbIp = landmarks[3];
     const indexTip = landmarks[8];
     const indexPip = landmarks[6];
     const middleTip = landmarks[12];
@@ -367,21 +217,31 @@ export default function GestureCanvas() {
     const pinkyTip = landmarks[20];
     const pinkyPip = landmarks[18];
 
-    const pinchDist = Math.sqrt(
-      Math.pow(thumbTip.x - indexTip.x, 2) + 
-      Math.pow(thumbTip.y - indexTip.y, 2)
-    );
-
     const isIndexExtended = indexTip.y < indexPip.y;
     const isMiddleExtended = middleTip.y < middlePip.y;
     const isRingExtended = ringTip.y < ringPip.y;
     const isPinkyExtended = pinkyTip.y < pinkyPip.y;
-    const isThumbExtended = Math.abs(thumbTip.x - landmarks[2].x) > 0.05;
 
+    const pinchDist = Math.sqrt(
+      Math.pow(thumbTip.x - indexTip.x, 2) + 
+      Math.pow(thumbTip.y - indexTip.y, 2) +
+      Math.pow(thumbTip.z - indexTip.z, 2)
+    );
+
+    // OK Sign: index and thumb pinched, other fingers extended
     if (pinchDist < 0.05 && isMiddleExtended && isRingExtended && isPinkyExtended) return "OK";
-    if (pinchDist < 0.05) return "Drawing";
+    
+    // Pinch to Scale: index and thumb pinched, others mostly closed
+    if (pinchDist < 0.06 && !isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Pinch";
+
+    // Index Finger Drawing: Only index finger extended
+    if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Drawing";
+
+    // Open Palm (Wave): All fingers extended
+    if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) return "Open Palm";
+
+    // Peace Sign
     if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Peace";
-    if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended && isThumbExtended) return "Open Palm";
 
     return "Idle";
   };
@@ -402,27 +262,23 @@ export default function GestureCanvas() {
               exit={{ scale: 0.9, y: 20 }}
               className="bg-slate-900 border border-slate-700 p-6 sm:p-8 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col gap-6"
             >
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Welcome to Kinetix 👋</h2>
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">3D Math & Gesture Sculptor 🧊</h2>
               <div className="flex flex-col gap-4 text-slate-300">
                 <div className="flex items-center gap-4">
+                  <div className="text-3xl">☝️</div>
+                  <div><strong className="text-white">Index Finger:</strong> Draw 3D Splines in space.</div>
+                </div>
+                <div className="flex items-center gap-4">
                   <div className="text-3xl">🤏</div>
-                  <div><strong className="text-white">Pinch:</strong> Draw (2D) or Spawn Objects (3D)</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">🖐️</div>
-                  <div><strong className="text-white">Open Palm:</strong> Clear the Canvas</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">👌</div>
-                  <div><strong className="text-white">"OK" Sign:</strong> Hold to cycle colors</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">✌️</div>
-                  <div><strong className="text-white">Peace Sign:</strong> Pause / Idle</div>
+                  <div><strong className="text-white">Pinch & Move Y:</strong> Scale the active object.</div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-3xl">👋</div>
-                  <div><strong className="text-white">Swipe Left:</strong> Quick Undo</div>
+                  <div><strong className="text-white">Wave (Side to side):</strong> Erase entire scene.</div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">👌</div>
+                  <div><strong className="text-white">"OK" Sign:</strong> Hold to cycle colors.</div>
                 </div>
               </div>
               <button 
@@ -430,41 +286,6 @@ export default function GestureCanvas() {
                 className="mt-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-lg py-3 rounded-xl transition-colors"
               >
                 Start Sculpting
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {show3DInstructions && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 pointer-events-auto"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-slate-900 border border-slate-700 p-6 sm:p-8 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col gap-6"
-            >
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">3D Sculpting Viewer 🧊</h2>
-              <div className="flex flex-col gap-4 text-slate-300 text-base sm:text-lg">
-                <p>Welcome to the 3D Viewer!</p>
-                <ol className="list-decimal pl-5 flex flex-col gap-2">
-                  <li><strong>Draw a closed shape</strong> (Square or Circle) in 2D mode.</li>
-                  <li>Our engine will <strong>Auto-Snap</strong> it.</li>
-                  <li>Switch back here to see your shapes <strong>extruded into 3D objects</strong>!</li>
-                </ol>
-                <p className="mt-2 text-cyan-400 font-semibold">
-                  🖱️ Use your mouse to click, drag, and zoom around the 3D scene.
-                </p>
-              </div>
-              <button 
-                onClick={() => setShow3DInstructions(false)}
-                className="mt-4 bg-pink-500 hover:bg-pink-400 text-white font-bold text-lg py-3 rounded-xl transition-colors shadow-[0_0_20px_rgba(236,72,153,0.5)]"
-              >
-                Got it!
               </button>
             </motion.div>
           </motion.div>
@@ -479,52 +300,37 @@ export default function GestureCanvas() {
         </div>
       )}
 
-      {!isLoaded && !error && (
+      {!isLoaded && !error && !showInstructions && (
         <div className="absolute z-10 flex flex-col items-center text-slate-400 gap-4 max-w-sm text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto text-cyan-400" />
           <div>
-            <p className="animate-pulse text-lg font-semibold text-slate-200">Loading Tracking Engine...</p>
-            <p className="text-xs text-slate-500 mt-2">
-              Downloading necessary AI models and initializing camera. This may take a few seconds on the first load.
-            </p>
+            <p className="animate-pulse text-lg font-semibold text-slate-200">Loading AI Tracking Engine...</p>
           </div>
         </div>
       )}
 
-      {/* Main Container */}
       <div 
         ref={containerRef}
         className={cn(
-          "relative w-full h-full sm:max-w-6xl sm:aspect-video sm:h-auto sm:rounded-3xl overflow-hidden sm:shadow-2xl sm:border border-white/10 bg-black/50 transition-opacity duration-1000", 
+          "relative w-full h-full sm:max-w-7xl sm:aspect-video sm:h-auto sm:rounded-3xl overflow-hidden sm:shadow-2xl sm:border border-white/10 bg-black/50 transition-opacity duration-1000", 
           isLoaded ? "opacity-100" : "opacity-0"
         )}
       >
         <video
           ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover scale-x-[-1]"
+          className="absolute inset-0 w-full h-full object-cover scale-x-[-1] opacity-30"
           autoPlay
           playsInline
           muted
         />
-        
-        <canvas
-          ref={canvasRef}
-          className={cn("absolute inset-0 w-full h-full z-10 pointer-events-none", mode === "3D" && "hidden")}
-        />
 
-        {mode === "3D" && (
-          <ThreeCanvas 
-            strokes={strokesRef.current as any}
-            canvasWidth={canvasRef.current?.width || 1280}
-            canvasHeight={canvasRef.current?.height || 720}
-          />
-        )}
+        {/* 3D Canvas handles all rendering autonomously */}
+        <ThreeCanvas handDataRef={handDataRef} />
       </div>
 
       {/* Floating Bottom Toolbar */}
       <div className="absolute bottom-6 sm:bottom-10 z-20 flex items-center justify-center px-4 sm:px-6 py-3 sm:py-4 rounded-full bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.5)] gap-4 sm:gap-8 overflow-x-auto max-w-[90vw]">
         
-        {/* Active Gesture Indicator */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-800 border border-white/5">
             <AnimatePresence mode="wait">
@@ -537,22 +343,22 @@ export default function GestureCanvas() {
                 className="text-slate-300"
               >
                 {gesture === "Drawing" && <Paintbrush size={18} />}
+                {gesture === "Pinch" && <Maximize size={18} />}
                 {gesture === "Open Palm" && <Eraser size={18} />}
-                {(gesture === "Idle" || gesture === "Peace") && <Hand size={18} />}
+                {(gesture === "Idle" || gesture === "Peace" || gesture === "OK") && <Hand size={18} />}
               </motion.div>
             </AnimatePresence>
           </div>
           <div className="flex flex-col">
             <span className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Gesture</span>
-            <span className="text-xs sm:text-sm font-medium text-slate-200">
-              {gesture === "OK" ? "Cycling..." : gesture}
+            <span className="text-xs sm:text-sm font-medium text-slate-200 w-16">
+              {gesture === "OK" ? "Cycling" : gesture}
             </span>
           </div>
         </div>
 
         <div className="w-px h-8 bg-white/10 shrink-0" />
 
-        {/* Color Palette Indicator */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {COLORS.map((color, idx) => {
             const isActive = idx === activeColorIndex;
@@ -578,36 +384,6 @@ export default function GestureCanvas() {
             );
           })}
         </div>
-
-        <div className="w-px h-8 bg-white/10 shrink-0" />
-
-        {/* 2D / 3D Toggle */}
-        <button 
-          onClick={() => {
-            if (mode === "2D") {
-              setMode("3D");
-              if (!hasSeen3D) {
-                setShow3DInstructions(true);
-                setHasSeen3D(true);
-              }
-            } else {
-              setMode("2D");
-            }
-          }}
-          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-white/5 shrink-0"
-        >
-          {mode === "2D" ? (
-            <>
-              <Pencil size={14} className="text-cyan-400" />
-              <span className="text-xs font-semibold text-slate-200">2D Mode</span>
-            </>
-          ) : (
-            <>
-              <Cuboid size={14} className="text-pink-400" />
-              <span className="text-xs font-semibold text-slate-200">3D Mode</span>
-            </>
-          )}
-        </button>
 
       </div>
     </div>
