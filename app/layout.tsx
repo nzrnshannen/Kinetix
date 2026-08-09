@@ -16,6 +16,9 @@ export const metadata: Metadata = {
   title: "Kinetix Air-Drawing",
   description: "Real-time Air-Drawing & Gesture Canvas",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icon.svg?v=2", // Forces browser to bypass favicon cache
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
