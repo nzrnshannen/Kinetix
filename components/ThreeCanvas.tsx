@@ -83,7 +83,7 @@ export default function ThreeCanvas(props: ThreeCanvasProps) {
         
         <ShapeManager {...props} />
 
-        <EffectComposer disableNormalPass>
+        <EffectComposer>
           <Bloom luminanceThreshold={0} mipmapBlur intensity={1.5} />
         </EffectComposer>
 
