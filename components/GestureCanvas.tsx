@@ -43,6 +43,9 @@ export default function GestureCanvas() {
   const [activeColorIndex, setActiveColorIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showInstructions, setShowInstructions] = useState(true);
+  const [show3DInstructions, setShow3DInstructions] = useState(false);
+  const [hasSeen3D, setHasSeen3D] = useState(false);
 
   // Telemetry state
   const [fps, setFps] = useState(0);
@@ -94,6 +97,8 @@ export default function GestureCanvas() {
   }, []);
 
   useEffect(() => {
+    if (showInstructions) return;
+
     let stream: MediaStream | null = null;
 
     const initMediaPipe = async () => {
@@ -134,7 +139,7 @@ export default function GestureCanvas() {
       if (landmarkerRef.current) landmarkerRef.current.close();
       if (stream) stream.getTracks().forEach((track) => track.stop());
     };
-  }, []);
+  }, [showInstructions]);
 
   const drawStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     ctx.clearRect(0, 0, width, height);
@@ -383,6 +388,89 @@ export default function GestureCanvas() {
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden overscroll-none">
+      <AnimatePresence>
+        {showInstructions && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-slate-900 border border-slate-700 p-6 sm:p-8 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col gap-6"
+            >
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Welcome to Kinetix 👋</h2>
+              <div className="flex flex-col gap-4 text-slate-300">
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">🤏</div>
+                  <div><strong className="text-white">Pinch:</strong> Draw (2D) or Spawn Objects (3D)</div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">🖐️</div>
+                  <div><strong className="text-white">Open Palm:</strong> Clear the Canvas</div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">👌</div>
+                  <div><strong className="text-white">"OK" Sign:</strong> Hold to cycle colors</div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">✌️</div>
+                  <div><strong className="text-white">Peace Sign:</strong> Pause / Idle</div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-3xl">👋</div>
+                  <div><strong className="text-white">Swipe Left:</strong> Quick Undo</div>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowInstructions(false)}
+                className="mt-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-lg py-3 rounded-xl transition-colors"
+              >
+                Start Sculpting
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {show3DInstructions && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 pointer-events-auto"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-slate-900 border border-slate-700 p-6 sm:p-8 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col gap-6"
+            >
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">3D Sculpting Viewer 🧊</h2>
+              <div className="flex flex-col gap-4 text-slate-300 text-base sm:text-lg">
+                <p>Welcome to the 3D Viewer!</p>
+                <ol className="list-decimal pl-5 flex flex-col gap-2">
+                  <li><strong>Draw a closed shape</strong> (Square or Circle) in 2D mode.</li>
+                  <li>Our engine will <strong>Auto-Snap</strong> it.</li>
+                  <li>Switch back here to see your shapes <strong>extruded into 3D objects</strong>!</li>
+                </ol>
+                <p className="mt-2 text-cyan-400 font-semibold">
+                  🖱️ Use your mouse to click, drag, and zoom around the 3D scene.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShow3DInstructions(false)}
+                className="mt-4 bg-pink-500 hover:bg-pink-400 text-white font-bold text-lg py-3 rounded-xl transition-colors shadow-[0_0_20px_rgba(236,72,153,0.5)]"
+              >
+                Got it!
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Telemetry fps={fps} handPos={handPos} />
 
       {error && (
@@ -426,9 +514,9 @@ export default function GestureCanvas() {
 
         {mode === "3D" && (
           <ThreeCanvas 
-            isPinching={gesture === "Drawing"} 
-            pinchPos={handPos} 
-            activeColor={COLORS[activeColorIndex]} 
+            strokes={strokesRef.current as any}
+            canvasWidth={canvasRef.current?.width || 1280}
+            canvasHeight={canvasRef.current?.height || 720}
           />
         )}
       </div>
@@ -495,7 +583,17 @@ export default function GestureCanvas() {
 
         {/* 2D / 3D Toggle */}
         <button 
-          onClick={() => setMode(prev => prev === "2D" ? "3D" : "2D")}
+          onClick={() => {
+            if (mode === "2D") {
+              setMode("3D");
+              if (!hasSeen3D) {
+                setShow3DInstructions(true);
+                setHasSeen3D(true);
+              }
+            } else {
+              setMode("2D");
+            }
+          }}
           className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-white/5 shrink-0"
         >
           {mode === "2D" ? (

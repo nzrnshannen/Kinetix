@@ -1,83 +1,74 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Float } from "@react-three/drei";
+import { useThree, Canvas } from "@react-three/fiber";
+import { ContactShadows, Float, OrbitControls } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
-interface ThreeCanvasProps {
-  isPinching: boolean;
-  pinchPos: { x: number; y: number } | null;
-  activeColor: string;
-}
-
-interface ShapeData {
-  id: string;
-  position: THREE.Vector3;
+export interface Stroke3D {
+  points: { x: number; y: number }[];
   color: string;
-  size: number;
+  isShape?: "Circle" | "Rectangle";
+  bbox?: { x: number; y: number; w: number; h: number };
 }
 
-function ShapeManager({ isPinching, pinchPos, activeColor }: ThreeCanvasProps) {
-  const [shapes, setShapes] = useState<ShapeData[]>([]);
-  const { viewport, camera } = useThree();
-  const lastPinchRef = useRef(false);
+interface ThreeCanvasProps {
+  strokes: Stroke3D[];
+  canvasWidth: number;
+  canvasHeight: number;
+}
 
-  useEffect(() => {
-    if (isPinching && !lastPinchRef.current && pinchPos) {
-      // Just started pinching - spawn a new shape!
-      
-      // Map normalized 2D coords (0-1) to 3D Viewport coords
-      // X: 0 is left, 1 is right -> viewport.width / -2 to viewport.width / 2
-      // Y: 0 is top, 1 is bottom -> viewport.height / 2 to viewport.height / -2
-      
-      const x = (pinchPos.x - 0.5) * viewport.width;
-      const y = -(pinchPos.y - 0.5) * viewport.height;
-      const z = (Math.random() - 0.5) * 5; // Spawn at random depth
-
-      const newShape: ShapeData = {
-        id: crypto.randomUUID(),
-        position: new THREE.Vector3(x, y, z),
-        color: activeColor,
-        size: Math.random() * 0.5 + 0.5, // 0.5 to 1.0 size
-      };
-
-      setShapes((prev) => [...prev, newShape]);
-    }
-    
-    lastPinchRef.current = isPinching;
-  }, [isPinching, pinchPos, activeColor, viewport]);
+function ShapeManager({ strokes, canvasWidth, canvasHeight }: ThreeCanvasProps) {
+  const { viewport } = useThree();
 
   return (
     <>
-      {shapes.map((shape) => (
-        <Float key={shape.id} speed={2} rotationIntensity={2} floatIntensity={2}>
-          <mesh position={shape.position} castShadow receiveShadow>
-            {Math.random() > 0.5 ? (
-              <boxGeometry args={[shape.size, shape.size, shape.size]} />
-            ) : (
-              <sphereGeometry args={[shape.size / 2, 32, 32]} />
-            )}
-            <meshStandardMaterial 
-              color={shape.color} 
-              emissive={shape.color} 
-              emissiveIntensity={3} 
-              toneMapped={false} 
-              roughness={0.8} 
-              metalness={0.2} 
-            />
-          </mesh>
-        </Float>
-      ))}
+      {strokes.filter(s => s.isShape && s.bbox).map((stroke, i) => {
+        const { x, y, w, h } = stroke.bbox!;
+        
+        // Map 2D pixel coordinates to 3D viewport coordinates
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        
+        const nx = cx / canvasWidth;
+        const ny = cy / canvasHeight;
+
+        const vx = (nx - 0.5) * viewport.width;
+        const vy = -(ny - 0.5) * viewport.height;
+        
+        const vw = (w / canvasWidth) * viewport.width;
+        const vh = (h / canvasHeight) * viewport.height;
+        const size = Math.max(vw, vh);
+
+        return (
+          <Float key={i} speed={2} rotationIntensity={2} floatIntensity={2}>
+            <mesh position={[vx, vy, 0]} castShadow receiveShadow>
+              {stroke.isShape === "Rectangle" ? (
+                <boxGeometry args={[size, size, size]} />
+              ) : (
+                <sphereGeometry args={[size / 2, 32, 32]} />
+              )}
+              <meshStandardMaterial 
+                color={stroke.color} 
+                emissive={stroke.color} 
+                emissiveIntensity={3} 
+                toneMapped={false} 
+                roughness={0.8} 
+                metalness={0.2} 
+              />
+            </mesh>
+          </Float>
+        );
+      })}
     </>
   );
 }
 
 export default function ThreeCanvas(props: ThreeCanvasProps) {
   return (
-    <div className="absolute inset-0 w-full h-full z-10">
+    <div className="absolute inset-0 w-full h-full z-10 pointer-events-auto cursor-grab active:cursor-grabbing">
       <Canvas camera={{ position: [0, 0, 10], fov: 50 }}>
+        <OrbitControls enableZoom={true} makeDefault />
         <ambientLight intensity={0.2} />
         <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={0.5} castShadow />
         
