@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer glowing hexagon (cube silhouette) -->
+  <path d="M256 64 L424 160 L424 352 L256 448 L88 352 L88 160 Z" 
+        fill="none" stroke="url(#neon)" stroke-width="48" stroke-linejoin="round" />
+        
+  <!-- Inner cube edges -->
+  <path d="M88 160 L256 256 L424 160 M256 256 L256 448" 
+        fill="none" stroke="url(#neon)" stroke-width="48" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- Cursor (Representing Manipulation) -->
+  <path d="M210 180 L370 270 L260 290 L230 420 Z" 
+        fill="#a855f7" stroke="#06b6d4" stroke-width="32" stroke-linejoin="round"/>
+</svg>
