@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, ContactShadows, Float } from "@react-three/drei";
+import { ContactShadows, Float } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
@@ -62,10 +62,10 @@ function ShapeManager({ isPinching, pinchPos, activeColor }: ThreeCanvasProps) {
             <meshStandardMaterial 
               color={shape.color} 
               emissive={shape.color} 
-              emissiveIntensity={2} 
+              emissiveIntensity={3} 
               toneMapped={false} 
-              roughness={0.1} 
-              metalness={0.8} 
+              roughness={0.8} 
+              metalness={0.2} 
             />
           </mesh>
         </Float>
@@ -78,9 +78,8 @@ export default function ThreeCanvas(props: ThreeCanvasProps) {
   return (
     <div className="absolute inset-0 w-full h-full z-10">
       <Canvas camera={{ position: [0, 0, 10], fov: 50 }}>
-        <ambientLight intensity={0.5} />
-        <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={1} castShadow />
-        <Environment preset="city" />
+        <ambientLight intensity={0.2} />
+        <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={0.5} castShadow />
         
         <ShapeManager {...props} />
 
