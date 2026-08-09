@@ -8,10 +8,18 @@ import { Hand, Paintbrush, Eraser, Loader2, Cuboid, Pencil } from "lucide-react"
 import Telemetry from "./Telemetry";
 import ThreeCanvas from "./ThreeCanvas";
 
-type Gesture = "Idle" | "Drawing" | "Peace" | "Open Palm";
+type Gesture = "Idle" | "Drawing" | "Peace" | "Open Palm" | "OK";
 type AppMode = "2D" | "3D";
 
-const COLORS = ["#ff00ff", "#00ffff", "#00ff00"];
+const COLORS = [
+  "#06b6d4", // Cyberpunk Cyan
+  "#f472b6", // Neon Pink
+  "#a3e635", // Toxic Lime
+  "#a855f7", // Electric Purple
+  "#fde047", // Solar Yellow
+  "#f97316", // Blaze Orange
+  "#ffffff", // Plasma White
+];
 
 interface Point {
   x: number;
@@ -231,19 +239,24 @@ export default function GestureCanvas() {
     const now = performance.now();
     const state = gestureStateRef.current;
 
-    // Track gesture duration for peace sign (color swap)
-    if (currentGesture === "Peace") {
-      if (state.type !== "Peace") {
-        state.type = "Peace";
-        state.startTime = now;
-        state.triggered = false;
-      } else if (!state.triggered && now - state.startTime > 1000) {
+    // Track gesture duration for OK sign (color swap)
+    if (currentGesture === "OK") {
+      if (state.type !== "OK") {
+        if (now - state.startTime > 1000) { // 1 second cooldown
+          state.type = "OK";
+          state.startTime = now;
+          state.triggered = false;
+        }
+      } else if (!state.triggered && now - state.startTime > 500) {
         setActiveColorIndex((prev) => (prev + 1) % COLORS.length);
         state.triggered = true;
+        state.startTime = now; // reset start time to begin the cooldown
       }
     } else {
-      state.type = currentGesture;
-      state.triggered = false;
+      if (state.type !== "OK" || (state.type === "OK" && now - state.startTime > 1000)) {
+        state.type = currentGesture;
+        state.triggered = false;
+      }
     }
 
     // Handle Open Palm to clear
@@ -360,6 +373,7 @@ export default function GestureCanvas() {
     const isPinkyExtended = pinkyTip.y < pinkyPip.y;
     const isThumbExtended = Math.abs(thumbTip.x - landmarks[2].x) > 0.05;
 
+    if (pinchDist < 0.05 && isMiddleExtended && isRingExtended && isPinkyExtended) return "OK";
     if (pinchDist < 0.05) return "Drawing";
     if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Peace";
     if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended && isThumbExtended) return "Open Palm";
@@ -443,7 +457,7 @@ export default function GestureCanvas() {
           <div className="flex flex-col">
             <span className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Gesture</span>
             <span className="text-xs sm:text-sm font-medium text-slate-200">
-              {gesture === "Peace" ? "Hold..." : gesture}
+              {gesture === "OK" ? "Cycling..." : gesture}
             </span>
           </div>
         </div>
@@ -457,8 +471,9 @@ export default function GestureCanvas() {
             return (
               <motion.div
                 key={color}
-                className="relative flex items-center justify-center"
+                className="relative flex items-center justify-center cursor-pointer"
                 animate={{ scale: isActive ? 1.2 : 1 }}
+                onClick={() => setActiveColorIndex(idx)}
               >
                 {isActive && (
                   <motion.div
@@ -468,7 +483,7 @@ export default function GestureCanvas() {
                   />
                 )}
                 <div
-                  className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-slate-900 z-10"
+                  className={cn("w-5 h-5 sm:w-6 sm:h-6 rounded-full z-10 transition-colors", isActive ? "border-2 border-white" : "border-2 border-slate-900")}
                   style={{ backgroundColor: color }}
                 />
               </motion.div>

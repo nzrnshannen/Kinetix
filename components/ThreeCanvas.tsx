@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, ContactShadows, Float } from "@react-three/drei";
+import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import * as THREE from "three";
 
 interface ThreeCanvasProps {
@@ -58,7 +59,14 @@ function ShapeManager({ isPinching, pinchPos, activeColor }: ThreeCanvasProps) {
             ) : (
               <sphereGeometry args={[shape.size / 2, 32, 32]} />
             )}
-            <meshStandardMaterial color={shape.color} roughness={0.1} metalness={0.8} />
+            <meshStandardMaterial 
+              color={shape.color} 
+              emissive={shape.color} 
+              emissiveIntensity={2} 
+              toneMapped={false} 
+              roughness={0.1} 
+              metalness={0.8} 
+            />
           </mesh>
         </Float>
       ))}
@@ -75,6 +83,10 @@ export default function ThreeCanvas(props: ThreeCanvasProps) {
         <Environment preset="city" />
         
         <ShapeManager {...props} />
+
+        <EffectComposer disableNormalPass>
+          <Bloom luminanceThreshold={0} mipmapBlur intensity={1.5} />
+        </EffectComposer>
 
         <ContactShadows position={[0, -4, 0]} opacity={0.5} scale={20} blur={2} far={10} />
       </Canvas>
