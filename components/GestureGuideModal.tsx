@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { X, Hand, HandMetal, Move, MousePointer2, Maximize, CircleDashed, ChevronRight, ChevronLeft, Pencil, Cuboid } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,6 +11,8 @@ interface GestureGuideModalProps {
 
 export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModalProps) {
   const [currentPage, setCurrentPage] = useState(0);
+
+  if (!isOpen) return null;
 
   const pages = [
     {
@@ -46,8 +47,7 @@ export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModal
       setCurrentPage(prev => prev + 1);
     } else {
       onClose();
-      // Reset back to page 0 after closing animation completes
-      setTimeout(() => setCurrentPage(0), 500);
+      setTimeout(() => setCurrentPage(0), 300);
     }
   };
 
@@ -60,131 +60,93 @@ export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModal
   const activePage = pages[currentPage];
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto"
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto animate-in fade-in duration-300">
+      <div className="relative w-full max-w-lg bg-[#0f0f11] rounded-[24px] shadow-2xl overflow-hidden flex flex-col border border-white/5 animate-in zoom-in-95 duration-300">
+        
+        {/* Neon Top Bar */}
+        <div className={cn("absolute top-0 inset-x-0 h-1 bg-gradient-to-r", activePage.topBar)} />
+
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full transition-colors z-10"
         >
-          <motion.div 
-            initial={{ scale: 0.95, y: 10, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.95, y: 10, opacity: 0 }}
-            className="relative w-full max-w-lg bg-[#0f0f11] rounded-[24px] shadow-2xl overflow-hidden flex flex-col border border-white/5"
-          >
-            {/* Neon Top Bar */}
-            <div className={cn("absolute top-0 inset-x-0 h-1 bg-gradient-to-r", activePage.topBar)} />
+          <X size={20} />
+        </button>
+
+        <div className="px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center transition-all duration-300">
+          
+          {/* Circular Icon */}
+          <div className={cn("w-16 h-16 rounded-full flex items-center justify-center border mb-6 transition-all duration-300", activePage.iconBg, activePage.borderColor)}>
+            {activePage.icon}
+          </div>
+
+          {/* Title */}
+          <h2 className="text-2xl font-bold text-white mb-2 text-center transition-all duration-300">
+            {activePage.title}
+          </h2>
+
+          {/* Instructions List */}
+          <div className="w-full mt-6 min-h-[220px]">
+            <div className="flex flex-col gap-4 animate-in slide-in-from-right-4 fade-in duration-300" key={currentPage}>
+              {activePage.instructions.map((inst, idx) => (
+                <div key={idx} className="flex items-start gap-3">
+                  <div className={cn("mt-0.5 p-2 rounded-lg bg-white/5 text-slate-300")}>
+                    {inst.icon}
+                  </div>
+                  <div>
+                    <h4 className="text-white font-semibold text-sm">{inst.title}</h4>
+                    <p className="text-slate-400 text-sm leading-snug mt-0.5">{inst.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Navigation Controls */}
+          <div className="w-full flex items-center justify-between mt-8">
+            {currentPage > 0 ? (
+              <button 
+                onClick={handlePrev}
+                className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+              >
+                <ChevronLeft size={24} />
+              </button>
+            ) : (
+              <div className="w-12" /> // spacer
+            )}
+            
+            {/* Page Dots */}
+            <div className="flex gap-2">
+              {pages.map((_, idx) => (
+                <div 
+                  key={idx} 
+                  className={cn(
+                    "w-2 h-2 rounded-full transition-all duration-300",
+                    idx === currentPage ? "bg-white w-4" : "bg-white/20"
+                  )}
+                />
+              ))}
+            </div>
 
             <button 
-              onClick={onClose}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full transition-colors z-10"
+              onClick={handleNext}
+              className={cn(
+                "p-3 rounded-full transition-all flex items-center justify-center",
+                currentPage === pages.length - 1 
+                  ? "bg-white text-black hover:bg-slate-200 px-6 font-semibold" 
+                  : "text-slate-400 hover:text-white hover:bg-white/5"
+              )}
             >
-              <X size={20} />
+              {currentPage === pages.length - 1 ? (
+                "Let's Draw"
+              ) : (
+                <ChevronRight size={24} />
+              )}
             </button>
+          </div>
 
-            <div className="px-6 py-8 sm:px-10 sm:py-10 flex flex-col items-center">
-              
-              {/* Circular Icon */}
-              <AnimatePresence mode="wait">
-                <motion.div 
-                  key={currentPage}
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  className={cn("w-16 h-16 rounded-full flex items-center justify-center border mb-6", activePage.iconBg, activePage.borderColor)}
-                >
-                  {activePage.icon}
-                </motion.div>
-              </AnimatePresence>
-
-              {/* Title */}
-              <AnimatePresence mode="wait">
-                <motion.h2 
-                  key={currentPage}
-                  initial={{ y: 10, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: -10, opacity: 0 }}
-                  className="text-2xl font-bold text-white mb-2 text-center"
-                >
-                  {activePage.title}
-                </motion.h2>
-              </AnimatePresence>
-
-              {/* Instructions List */}
-              <div className="w-full mt-6 min-h-[220px]">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={currentPage}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.2 }}
-                    className="flex flex-col gap-4"
-                  >
-                    {activePage.instructions.map((inst, idx) => (
-                      <div key={idx} className="flex items-start gap-3">
-                        <div className={cn("mt-0.5 p-2 rounded-lg bg-white/5 text-slate-300")}>
-                          {inst.icon}
-                        </div>
-                        <div>
-                          <h4 className="text-white font-semibold text-sm">{inst.title}</h4>
-                          <p className="text-slate-400 text-sm leading-snug mt-0.5">{inst.desc}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-
-              {/* Navigation Controls */}
-              <div className="w-full flex items-center justify-between mt-8">
-                {currentPage > 0 ? (
-                  <button 
-                    onClick={handlePrev}
-                    className="p-3 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
-                  >
-                    <ChevronLeft size={24} />
-                  </button>
-                ) : (
-                  <div className="w-12" /> // spacer
-                )}
-                
-                {/* Page Dots */}
-                <div className="flex gap-2">
-                  {pages.map((_, idx) => (
-                    <div 
-                      key={idx} 
-                      className={cn(
-                        "w-2 h-2 rounded-full transition-all duration-300",
-                        idx === currentPage ? "bg-white w-4" : "bg-white/20"
-                      )}
-                    />
-                  ))}
-                </div>
-
-                <button 
-                  onClick={handleNext}
-                  className={cn(
-                    "p-3 rounded-full transition-all flex items-center justify-center",
-                    currentPage === pages.length - 1 
-                      ? "bg-white text-black hover:bg-slate-200 px-6 font-semibold" 
-                      : "text-slate-400 hover:text-white hover:bg-white/5"
-                  )}
-                >
-                  {currentPage === pages.length - 1 ? (
-                    "Let's Draw"
-                  ) : (
-                    <ChevronRight size={24} />
-                  )}
-                </button>
-              </div>
-
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        </div>
+      </div>
+    </div>
   );
 }

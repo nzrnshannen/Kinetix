@@ -108,7 +108,6 @@ export default function GestureCanvas() {
   }, []);
 
   useEffect(() => {
-    if (showGuide) return;
     let stream: MediaStream | null = null;
 
     const initMediaPipe = async () => {
@@ -149,7 +148,7 @@ export default function GestureCanvas() {
       if (landmarkerRef.current) landmarkerRef.current.close();
       if (stream) stream.getTracks().forEach((track) => track.stop());
     };
-  }, [showGuide]);
+  }, []);
 
   const drawStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     ctx.clearRect(0, 0, width, height);
