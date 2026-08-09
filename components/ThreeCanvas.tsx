@@ -204,8 +204,21 @@ function SceneManager({ handDataRef }: { handDataRef: React.MutableRefObject<Han
     const dist = first.distanceTo(last);
     
     // Auto-Snap Detection
-    if (dist < 3 && maxDim > 2) { 
-      type = "Sphere"; // Convert closed loop into a Sphere
+    if (dist < 4 && maxDim > 2) { 
+      // Calculate total path length to determine if it's a circle or square
+      let pathLength = 0;
+      for (let i = 1; i < pts.length; i++) {
+         pathLength += pts[i].distanceTo(pts[i-1]);
+      }
+      
+      const ratio = pathLength / maxDim;
+      
+      // A circle circumference is ~3.14 * diameter. A square perimeter is 4 * diameter.
+      if (ratio > 3.6) {
+         type = "Box";
+      } else {
+         type = "Sphere";
+      }
       scale = maxDim / 2;
     }
 
