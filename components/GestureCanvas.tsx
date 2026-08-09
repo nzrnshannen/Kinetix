@@ -173,6 +173,11 @@ export default function GestureCanvas() {
     const canvas = canvasRef.current;
     if (!video || !canvas || !landmarkerRef.current) return;
 
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      requestRef.current = requestAnimationFrame(predictWebcam);
+      return;
+    }
+
     const now = performance.now();
     const delta = now - lastFrameTimeRef.current;
     if (delta > 0) {
