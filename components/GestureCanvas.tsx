@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
-import { Hand, Paintbrush, Eraser, Loader2, Maximize, Palette } from "lucide-react";
+import { Hand, Paintbrush, Eraser, Loader2, Maximize, Cuboid, Pencil, HelpCircle } from "lucide-react";
 import Telemetry from "./Telemetry";
 import ThreeCanvas from "./ThreeCanvas";
+import GestureGuideModal from "./GestureGuideModal";
 
 export type Gesture = "Idle" | "Drawing" | "Pinch" | "Open Palm" | "OK" | "Peace";
 
@@ -15,6 +16,18 @@ export interface HandData {
   gesture: Gesture;
   color: string;
   triggerWipe: boolean;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface Stroke {
+  points: Point[];
+  color: string;
+  isShape?: "Circle" | "Rectangle";
+  bbox?: { x: number; y: number; w: number; h: number };
 }
 
 const COLORS = [
@@ -30,12 +43,14 @@ const COLORS = [
 export default function GestureCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
+  const [appMode, setAppMode] = useState<"2D" | "3D">("2D");
   const [gesture, setGesture] = useState<Gesture>("Idle");
   const [activeColorIndex, setActiveColorIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showInstructions, setShowInstructions] = useState(true);
+  const [showGuide, setShowGuide] = useState(true);
 
   const [fps, setFps] = useState(0);
   const [handPos, setHandPos] = useState<{x: number, y: number} | null>(null);
@@ -45,8 +60,14 @@ export default function GestureCanvas() {
   const lastVideoTimeRef = useRef(-1);
   const lastFrameTimeRef = useRef(performance.now());
   const activeColorIndexRef = useRef(activeColorIndex);
+  const appModeRef = useRef(appMode);
 
-  // Shared ref for the 3D engine to poll at 60fps without React re-renders
+  // 2D State
+  const strokesRef = useRef<Stroke[]>([]);
+  const currentStrokeRef = useRef<Stroke | null>(null);
+  const is2DDrawingRef = useRef(false);
+
+  // 3D Shared Ref
   const handDataRef = useRef<HandData>({
     landmarks: null,
     gesture: "Idle",
@@ -54,7 +75,6 @@ export default function GestureCanvas() {
     triggerWipe: false,
   });
 
-  // Wave to erase tracking
   const waveTrackerRef = useRef<{ x: number, time: number, direction: number, changes: number } | null>(null);
 
   const gestureStateRef = useRef<{ type: Gesture; startTime: number; triggered: boolean }>({
@@ -67,7 +87,28 @@ export default function GestureCanvas() {
   }, [activeColorIndex]);
 
   useEffect(() => {
-    if (showInstructions) return;
+    appModeRef.current = appMode;
+  }, [appMode]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+      }
+    });
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (showGuide) return;
     let stream: MediaStream | null = null;
 
     const initMediaPipe = async () => {
@@ -97,7 +138,7 @@ export default function GestureCanvas() {
         }
       } catch (err: any) {
         console.error(err);
-        setError("Could not access webcam or load AI model. Please ensure camera permissions are granted.");
+        setError("Could not access webcam or load AI model. Ensure camera permissions are granted.");
       }
     };
 
@@ -108,7 +149,45 @@ export default function GestureCanvas() {
       if (landmarkerRef.current) landmarkerRef.current.close();
       if (stream) stream.getTracks().forEach((track) => track.stop());
     };
-  }, [showInstructions]);
+  }, [showGuide]);
+
+  const drawStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    ctx.clearRect(0, 0, width, height);
+
+    const allStrokes = [...strokesRef.current];
+    if (currentStrokeRef.current) {
+      allStrokes.push(currentStrokeRef.current);
+    }
+
+    allStrokes.forEach((stroke) => {
+      if (stroke.points.length === 0) return;
+
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = 6;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = stroke.color;
+
+      ctx.beginPath();
+      if (stroke.isShape && stroke.bbox) {
+        const { x, y, w, h } = stroke.bbox;
+        if (stroke.isShape === "Circle") {
+          const radius = Math.max(w, h) / 2;
+          ctx.arc(x + w/2, y + h/2, radius, 0, 2 * Math.PI);
+        } else if (stroke.isShape === "Rectangle") {
+          ctx.rect(x, y, w, h);
+        }
+      } else {
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        for (let i = 1; i < stroke.points.length; i++) {
+          ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+        }
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    });
+  };
 
   const predictWebcam = () => {
     const video = videoRef.current;
@@ -130,24 +209,76 @@ export default function GestureCanvas() {
       lastVideoTimeRef.current = video.currentTime;
       const results = landmarkerRef.current.detectForVideo(video, now);
       processResults(results, now);
+    } else {
+      if (appModeRef.current === "2D") {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) drawStrokes(ctx, canvas.width, canvas.height);
+        }
+      }
     }
 
     requestRef.current = requestAnimationFrame(predictWebcam);
   };
 
+  const handlePinchRelease = () => {
+    if (is2DDrawingRef.current && currentStrokeRef.current) {
+      const stroke = currentStrokeRef.current;
+      if (stroke.points.length > 10) {
+        const first = stroke.points[0];
+        const last = stroke.points[stroke.points.length - 1];
+        const dist = Math.sqrt(Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2));
+        
+        if (dist < 60) {
+          const xs = stroke.points.map(p => p.x);
+          const ys = stroke.points.map(p => p.y);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const w = maxX - minX;
+          const h = maxY - minY;
+
+          if (w > 20 && h > 20) {
+            stroke.bbox = { x: minX, y: minY, w, h };
+            if (Math.abs(w - h) < 40) {
+              stroke.isShape = "Circle";
+            } else {
+              stroke.isShape = "Rectangle";
+            }
+          }
+        }
+      }
+      strokesRef.current.push(stroke);
+    }
+    is2DDrawingRef.current = false;
+    currentStrokeRef.current = null;
+  };
+
   const processResults = (results: any, now: number) => {
+    const canvas = canvasRef.current;
+    
     if (!results.landmarks || results.landmarks.length === 0) {
       setGesture("Idle");
       setHandPos(null);
       handDataRef.current.landmarks = null;
       handDataRef.current.gesture = "Idle";
+      
+      if (appModeRef.current === "2D") {
+        handlePinchRelease();
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) drawStrokes(ctx, canvas.width, canvas.height);
+        }
+      }
       return;
     }
 
     const landmarks = results.landmarks[0];
     setHandPos({ x: 1 - landmarks[8].x, y: landmarks[8].y });
     
-    let currentGesture = detectGesture(landmarks);
+    let currentGesture = detectGesture(landmarks, appModeRef.current);
 
     // Wave detection logic
     if (currentGesture === "Open Palm") {
@@ -164,8 +295,13 @@ export default function GestureCanvas() {
             waveTrackerRef.current.time = now;
             
             if (waveTrackerRef.current.changes > 3) {
-              handDataRef.current.triggerWipe = true;
-              waveTrackerRef.current.changes = 0; // reset
+              if (appModeRef.current === "2D") {
+                strokesRef.current = [];
+                currentStrokeRef.current = null;
+              } else {
+                handDataRef.current.triggerWipe = true;
+              }
+              waveTrackerRef.current.changes = 0;
             }
           }
         } else if (dt >= 200) {
@@ -179,8 +315,6 @@ export default function GestureCanvas() {
     }
 
     const state = gestureStateRef.current;
-
-    // OK Sign Color Cycle Logic
     if (currentGesture === "OK") {
       if (state.type !== "OK") {
         if (now - state.startTime > 1000) {
@@ -200,14 +334,42 @@ export default function GestureCanvas() {
       }
     }
 
+    if (appModeRef.current === "2D" && canvas) {
+      if (currentGesture === "Drawing") {
+        const indexTip = landmarks[8];
+        const rawX = (1 - indexTip.x) * canvas.width;
+        const rawY = indexTip.y * canvas.height;
+
+        if (!is2DDrawingRef.current) {
+          is2DDrawingRef.current = true;
+          currentStrokeRef.current = {
+            points: [{ x: rawX, y: rawY }],
+            color: COLORS[activeColorIndexRef.current],
+          };
+        } else if (currentStrokeRef.current) {
+          const pts = currentStrokeRef.current.points;
+          const lastPos = pts[pts.length - 1];
+          const smoothing = 0.25; 
+          const x = lastPos.x + (rawX - lastPos.x) * smoothing;
+          const y = lastPos.y + (rawY - lastPos.y) * smoothing;
+          pts.push({ x, y });
+        }
+      } else {
+        handlePinchRelease();
+      }
+      
+      const ctx = canvas.getContext("2d");
+      if (ctx) drawStrokes(ctx, canvas.width, canvas.height);
+    }
+
     setGesture(currentGesture);
     handDataRef.current.landmarks = landmarks;
-    handDataRef.current.gesture = currentGesture;
+    // Don't pass 2D drawing gestures to 3D engine to prevent accidental splines
+    handDataRef.current.gesture = appModeRef.current === "3D" ? currentGesture : "Idle";
   };
 
-  const detectGesture = (landmarks: any[]): Gesture => {
+  const detectGesture = (landmarks: any[], mode: "2D" | "3D"): Gesture => {
     const thumbTip = landmarks[4];
-    const thumbIp = landmarks[3];
     const indexTip = landmarks[8];
     const indexPip = landmarks[6];
     const middleTip = landmarks[12];
@@ -228,19 +390,19 @@ export default function GestureCanvas() {
       Math.pow(thumbTip.z - indexTip.z, 2)
     );
 
-    // OK Sign: index and thumb pinched, other fingers extended
     if (pinchDist < 0.05 && isMiddleExtended && isRingExtended && isPinkyExtended) return "OK";
     
-    // Pinch to Scale: index and thumb pinched, others mostly closed
-    if (pinchDist < 0.06 && !isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Pinch";
+    // In 2D Mode, pinch draws. In 3D Mode, pinch scales.
+    if (pinchDist < 0.06 && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+      return mode === "2D" ? "Drawing" : "Pinch";
+    }
 
-    // Index Finger Drawing: Only index finger extended
-    if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Drawing";
+    // In 3D Mode, index finger extended draws.
+    if (mode === "3D" && isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+      return "Drawing";
+    }
 
-    // Open Palm (Wave): All fingers extended
     if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) return "Open Palm";
-
-    // Peace Sign
     if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) return "Peace";
 
     return "Idle";
@@ -248,49 +410,11 @@ export default function GestureCanvas() {
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden overscroll-none">
-      <AnimatePresence>
-        {showInstructions && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-slate-900 border border-slate-700 p-6 sm:p-8 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col gap-6"
-            >
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">3D Math & Gesture Sculptor 🧊</h2>
-              <div className="flex flex-col gap-4 text-slate-300">
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">☝️</div>
-                  <div><strong className="text-white">Index Finger:</strong> Draw 3D Splines in space.</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">🤏</div>
-                  <div><strong className="text-white">Pinch & Move Y:</strong> Scale the active object.</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">👋</div>
-                  <div><strong className="text-white">Wave (Side to side):</strong> Erase entire scene.</div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">👌</div>
-                  <div><strong className="text-white">"OK" Sign:</strong> Hold to cycle colors.</div>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowInstructions(false)}
-                className="mt-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-lg py-3 rounded-xl transition-colors"
-              >
-                Start Sculpting
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      
+      <GestureGuideModal 
+        isOpen={showGuide} 
+        onClose={() => setShowGuide(false)} 
+      />
 
       <Telemetry fps={fps} handPos={handPos} />
 
@@ -300,7 +424,7 @@ export default function GestureCanvas() {
         </div>
       )}
 
-      {!isLoaded && !error && !showInstructions && (
+      {!isLoaded && !error && !showGuide && (
         <div className="absolute z-10 flex flex-col items-center text-slate-400 gap-4 max-w-sm text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto text-cyan-400" />
           <div>
@@ -318,19 +442,33 @@ export default function GestureCanvas() {
       >
         <video
           ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover scale-x-[-1] opacity-30"
+          className="absolute inset-0 w-full h-full object-cover scale-x-[-1] opacity-40"
           autoPlay
           playsInline
           muted
         />
 
-        {/* 3D Canvas handles all rendering autonomously */}
-        <ThreeCanvas handDataRef={handDataRef} />
+        <canvas
+          ref={canvasRef}
+          className={cn("absolute inset-0 w-full h-full z-10 pointer-events-none", appMode === "3D" && "hidden")}
+        />
+
+        {appMode === "3D" && <ThreeCanvas handDataRef={handDataRef} />}
       </div>
 
       {/* Floating Bottom Toolbar */}
-      <div className="absolute bottom-6 sm:bottom-10 z-20 flex items-center justify-center px-4 sm:px-6 py-3 sm:py-4 rounded-full bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.5)] gap-4 sm:gap-8 overflow-x-auto max-w-[90vw]">
+      <div className="absolute bottom-6 sm:bottom-10 z-20 flex items-center justify-center px-4 sm:px-6 py-3 sm:py-4 rounded-full bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.5)] gap-4 sm:gap-8 overflow-x-auto max-w-[95vw]">
         
+        {/* Help Button */}
+        <button
+          onClick={() => setShowGuide(true)}
+          className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-800 hover:bg-slate-700 border border-white/5 text-slate-400 hover:text-white transition-colors shrink-0"
+        >
+          <HelpCircle size={18} />
+        </button>
+
+        <div className="w-px h-8 bg-white/10 shrink-0" />
+
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-slate-800 border border-white/5">
             <AnimatePresence mode="wait">
@@ -384,6 +522,26 @@ export default function GestureCanvas() {
             );
           })}
         </div>
+
+        <div className="w-px h-8 bg-white/10 shrink-0" />
+
+        {/* 2D / 3D Toggle */}
+        <button 
+          onClick={() => setAppMode(prev => prev === "2D" ? "3D" : "2D")}
+          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-white/5 shrink-0"
+        >
+          {appMode === "2D" ? (
+            <>
+              <Pencil size={14} className="text-cyan-400" />
+              <span className="text-xs font-semibold text-slate-200">2D Mode</span>
+            </>
+          ) : (
+            <>
+              <Cuboid size={14} className="text-pink-400" />
+              <span className="text-xs font-semibold text-slate-200">3D Mode</span>
+            </>
+          )}
+        </button>
 
       </div>
     </div>
