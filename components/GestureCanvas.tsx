@@ -378,9 +378,14 @@ export default function GestureCanvas() {
       )}
 
       {!isLoaded && !error && (
-        <div className="absolute z-10 flex flex-col items-center text-slate-400 gap-4">
-          <Loader2 className="w-8 h-8 animate-spin" />
-          <p className="animate-pulse">Loading Hand Tracking Engine...</p>
+        <div className="absolute z-10 flex flex-col items-center text-slate-400 gap-4 max-w-sm text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto text-cyan-400" />
+          <div>
+            <p className="animate-pulse text-lg font-semibold text-slate-200">Loading Tracking Engine...</p>
+            <p className="text-xs text-slate-500 mt-2">
+              Downloading necessary AI models and initializing camera. This may take a few seconds on the first load.
+            </p>
+          </div>
         </div>
       )}
 

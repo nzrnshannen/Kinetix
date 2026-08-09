@@ -21,9 +21,7 @@ self.addEventListener('fetch', (event) => {
         if (response) {
           return response;
         }
-        return fetch(event.request).catch(() => {
-          // Fallback logic if needed
-        });
+        return fetch(event.request);
       })
   );
 });
