@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Hand, HandMetal, Move, MousePointer2, Maximize, CircleDashed, ChevronRight, ChevronLeft, Pencil, Cuboid } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,8 +12,13 @@ interface GestureGuideModalProps {
 
 export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModalProps) {
   const [currentPage, setCurrentPage] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!isOpen || !mounted) return null;
 
   const pages = [
     {
@@ -59,7 +65,7 @@ export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModal
 
   const activePage = pages[currentPage];
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pointer-events-auto animate-in fade-in duration-300">
       <div className="relative w-full max-w-lg bg-[#0f0f11] rounded-[24px] shadow-2xl overflow-hidden flex flex-col border border-white/5 animate-in zoom-in-95 duration-300">
         
@@ -147,6 +153,7 @@ export default function GestureGuideModal({ isOpen, onClose }: GestureGuideModal
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
